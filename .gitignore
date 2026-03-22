@@ -1,0 +1,38 @@
+node_modules/
+dist/
+coverage/
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+Thumbs.db
+*.log
+*.pid
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# pnpm
+.pnpm-store/
+
+# Docker sandbox local data
+packages/openclaw-docker/data/*
+!packages/openclaw-docker/data/config/
+packages/openclaw-docker/data/config/*
+!packages/openclaw-docker/data/config/extensions/
+packages/openclaw-docker/data/config/extensions/*/node_modules/
+packages/openclaw-docker/ngrok.yml
+
+# Misc
+*.tmp
+*.temp
+.cursor/
+.cliver.*
+*.deb
+.frontend.pid

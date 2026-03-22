@@ -1,0 +1,67 @@
+{
+  "name": "@cliver-x402",
+  "version": "1.0.0",
+  "description": "Universal MCP gateway for AI agents to access ANY service or data they need. 30+ tools for images, audio, video, web research, compute, and more - all at cost with no markup.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "claude",
+    "image-generation",
+    "text-to-speech",
+    "video-generation",
+    "web-research",
+    "ai-tools"
+  ],
+  "author": "Cliver AI <hello@cliver.ai>",
+  "license": "MIT",
+  "homepage": "https://github.com/CliverClaw/CliverClaw/tree/main/packages/cliver-x402",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CliverClaw/CliverClaw.git",
+    "directory": "packages/cliver-x402"
+  },
+  "bugs": {
+    "url": "https://github.com/CliverClaw/CliverClaw/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "x402-mcp": "dist/bin/x402-mcp.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/bin/x402-mcp.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@x402/core": "^2.6.0",
+    "@x402/express": "^2.6.0",
+    "express": "^4.21.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

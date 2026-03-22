@@ -1,0 +1,13 @@
+{
+  "name": "cliverclaw",
+  "private": true,
+  "description": "CliverClaw monorepo — MCP tools and Docker sandbox for AI agents on Cliver",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CliverClaw/CliverClaw.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
