@@ -40,6 +40,15 @@ require_cmd docker
 require_cmd curl
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 required (try: docker compose version)"
 
+# ── Parse flags ────────────────────────────────────────────────
+INTERACTIVE=false
+for arg in "$@"; do
+  case "$arg" in
+    --interactive|-i) INTERACTIVE=true ;;
+  esac
+done
+export INTERACTIVE
+
 echo ""
 echo "═══════════════════════════════════════════════════════════"
 echo "  Cliver Agent — Automated Fresh Install"
@@ -81,21 +90,26 @@ export OPENCLAW_TZ="${OPENCLAW_TZ:-}"
 export OPENCLAW_CONFIG_DIR="$ROOT_DIR"
 export OPENCLAW_WORKSPACE_DIR="$ROOT_DIR"
 
-# ── Prompt for Cliver URLs ──────────────────────────────────────
+# ── Resolve Cliver URLs (auto-detect or prompt) ──────────────────
 echo ""
 CLIVER_API_DEFAULT="http://${CLIVER_HOST}:7000"
 CLIVER_CHAT_DEFAULT="http://${CLIVER_HOST}:7001"
 
-read -rp "Cliver API URL [${CLIVER_API_DEFAULT}]: " CLIVER_API_URL
+# Use env vars / .env values if already set, otherwise use defaults.
+# Only prompt interactively if --interactive is passed.
 CLIVER_API_URL="${CLIVER_API_URL:-$CLIVER_API_DEFAULT}"
-
-read -rp "Cliver Chat URL [${CLIVER_CHAT_DEFAULT}]: " CLIVER_CHAT_URL
 CLIVER_CHAT_URL="${CLIVER_CHAT_URL:-$CLIVER_CHAT_DEFAULT}"
+
+if [[ "${INTERACTIVE:-false}" == "true" ]]; then
+  read -rp "Cliver API URL [${CLIVER_API_URL}]: " _input
+  CLIVER_API_URL="${_input:-$CLIVER_API_URL}"
+  read -rp "Cliver Chat URL [${CLIVER_CHAT_URL}]: " _input
+  CLIVER_CHAT_URL="${_input:-$CLIVER_CHAT_URL}"
+fi
 
 export CLIVER_API_URL
 export CLIVER_CHAT_URL
 
-echo ""
 echo "  API URL:  $CLIVER_API_URL"
 echo "  Chat URL: $CLIVER_CHAT_URL"
 
@@ -121,10 +135,14 @@ else
   [[ "$CONTINUE" =~ ^[Yy] ]] || exit 1
 fi
 
-# ── Prompt for agent name ────────────────────────────────────────
+# ── Resolve agent name ────────────────────────────────────────
 echo ""
-read -rp "Agent name for the marketplace [OpenClaw Agent]: " AGENT_NAME
 AGENT_NAME="${AGENT_NAME:-OpenClaw Agent}"
+if [[ "$INTERACTIVE" == "true" ]]; then
+  read -rp "Agent name for the marketplace [${AGENT_NAME}]: " _input
+  AGENT_NAME="${_input:-$AGENT_NAME}"
+fi
+echo "  Agent name: $AGENT_NAME"
 
 # ── Auto-register on Cliver ─────────────────────────────────────
 echo ""
@@ -182,35 +200,51 @@ except: print('0', end='')
   fi
 fi
 
-# ── Prompt for Google AI API key ─────────────────────────────────
+# ── Resolve Google AI API key ─────────────────────────────────
 echo ""
-echo "The agent needs a Google AI API key to power its brain (LLM)."
-echo "Get one at: https://aistudio.google.com/apikey"
-echo ""
-read -rp "Google AI API key: " GOOGLE_API_KEY
-if [[ -z "$GOOGLE_API_KEY" ]]; then
-  fail "Google AI API key is required. The agent cannot function without it."
+if [[ -z "${GOOGLE_API_KEY:-}" ]]; then
+  if [[ "$INTERACTIVE" == "true" ]]; then
+    echo "The agent needs a Google AI API key to power its brain (LLM)."
+    echo "Get one at: https://aistudio.google.com/apikey"
+    echo ""
+    read -rp "Google AI API key: " GOOGLE_API_KEY
+  fi
+  if [[ -z "${GOOGLE_API_KEY:-}" ]]; then
+    fail "Google AI API key is required. Set GOOGLE_API_KEY in .env or pass --interactive."
+  fi
+else
+  echo "  Google AI key: ${GOOGLE_API_KEY:0:8}...${GOOGLE_API_KEY: -4} (from env)"
 fi
 
-# ── Prompt for ngrok ─────────────────────────────────────────────
+# ── Resolve ngrok config ─────────────────────────────────────────
 echo ""
-read -rp "Enable ngrok for remote access? (y/N): " ENABLE_NGROK
 ENABLE_NGROK="${ENABLE_NGROK:-n}"
-NGROK_DOMAIN=""
-if [[ "$ENABLE_NGROK" =~ ^[Yy] ]]; then
-  read -rp "ngrok domain (leave blank for random): " NGROK_DOMAIN
-  if [[ ! -f "$ROOT_DIR/ngrok.yml" ]]; then
-    echo ""
-    echo "  WARNING: ngrok.yml not found at $ROOT_DIR/ngrok.yml"
-    echo "  You need to create it with your ngrok authtoken."
-    echo "  See: https://dashboard.ngrok.com/get-started/your-authtoken"
-    echo ""
-    read -rp "Continue without ngrok config? (y/N): " SKIP_NGROK
-    if [[ ! "$SKIP_NGROK" =~ ^[Yy] ]]; then
-      fail "Create ngrok.yml first, then re-run setup"
+NGROK_DOMAIN="${NGROK_DOMAIN:-}"
+
+# Auto-detect: if ngrok.yml exists and NGROK_DOMAIN is set, enable automatically
+if [[ -f "$ROOT_DIR/ngrok.yml" ]] && [[ -n "$NGROK_DOMAIN" ]]; then
+  ENABLE_NGROK="y"
+  echo "  ngrok: enabled (domain: $NGROK_DOMAIN, from env)"
+elif [[ "$INTERACTIVE" == "true" ]]; then
+  read -rp "Enable ngrok for remote access? (y/N): " ENABLE_NGROK
+  ENABLE_NGROK="${ENABLE_NGROK:-n}"
+  if [[ "$ENABLE_NGROK" =~ ^[Yy] ]]; then
+    read -rp "ngrok domain (leave blank for random): " NGROK_DOMAIN
+    if [[ ! -f "$ROOT_DIR/ngrok.yml" ]]; then
+      echo ""
+      echo "  WARNING: ngrok.yml not found at $ROOT_DIR/ngrok.yml"
+      echo "  You need to create it with your ngrok authtoken."
+      echo "  See: https://dashboard.ngrok.com/get-started/your-authtoken"
+      echo ""
+      read -rp "Continue without ngrok config? (y/N): " SKIP_NGROK
+      if [[ ! "$SKIP_NGROK" =~ ^[Yy] ]]; then
+        fail "Create ngrok.yml first, then re-run setup"
+      fi
+      ENABLE_NGROK="n"
     fi
-    ENABLE_NGROK="n"
   fi
+else
+  echo "  ngrok: disabled (pass --interactive or set ENABLE_NGROK=y and NGROK_DOMAIN in .env)"
 fi
 
 # ── Detect LAN IP ───────────────────────────────────────────────
@@ -260,6 +294,10 @@ cat > "$ENV_FILE" <<EOF
 OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
 CLIVER_API_URL=${CLIVER_API_URL}
 CLIVER_CHAT_URL=${CLIVER_CHAT_URL}
+GOOGLE_API_KEY=${GOOGLE_API_KEY}
+AGENT_NAME=${AGENT_NAME}
+ENABLE_NGROK=${ENABLE_NGROK}
+NGROK_DOMAIN=${NGROK_DOMAIN}
 EOF
 
 # ── Pull gateway image ──────────────────────────────────────────
