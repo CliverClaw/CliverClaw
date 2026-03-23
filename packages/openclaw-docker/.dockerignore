@@ -1,0 +1,6 @@
+data/
+.env
+ngrok.yml
+*.log
+*.pid
+*.db

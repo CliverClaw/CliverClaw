@@ -265,7 +265,7 @@ echo "Detected LAN IP: ${LAN_IP:-none}"
 # ── Detect Docker socket GID ────────────────────────────────────
 DOCKER_SOCKET="/var/run/docker.sock"
 if [[ -S "$DOCKER_SOCKET" ]]; then
-  DOCKER_GID="$(stat -f '%g' "$DOCKER_SOCKET" 2>/dev/null || stat -c '%g' "$DOCKER_SOCKET" 2>/dev/null || echo "0")"
+  DOCKER_GID="$(stat -c '%g' "$DOCKER_SOCKET" 2>/dev/null || stat -f '%g' "$DOCKER_SOCKET" 2>/dev/null || echo "0")"
 else
   DOCKER_GID="0"
   echo "WARNING: Docker socket not found at $DOCKER_SOCKET"
@@ -289,13 +289,20 @@ mkdir -p "$CONFIG_DIR/agents/main/sessions"
 mkdir -p "$CONFIG_DIR/extensions"
 mkdir -p "$WORKSPACE_DIR/skills/cliver-marketplace"
 
+# ── Install extension dependencies ────────────────────────────
+EXTENSION_DIR="$CONFIG_DIR/extensions/cliver-marketplace"
+if [[ -f "$EXTENSION_DIR/package.json" ]] && [[ ! -d "$EXTENSION_DIR/node_modules" ]]; then
+  echo "==> Installing cliver-marketplace extension dependencies"
+  (cd "$EXTENSION_DIR" && npm install --omit=dev 2>&1)
+fi
+
 # ── Persist env vars ─────────────────────────────────────────────
 cat > "$ENV_FILE" <<EOF
 OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
 CLIVER_API_URL=${CLIVER_API_URL}
 CLIVER_CHAT_URL=${CLIVER_CHAT_URL}
 GOOGLE_API_KEY=${GOOGLE_API_KEY}
-AGENT_NAME=${AGENT_NAME}
+AGENT_NAME="${AGENT_NAME}"
 ENABLE_NGROK=${ENABLE_NGROK}
 NGROK_DOMAIN=${NGROK_DOMAIN}
 EOF
@@ -618,60 +625,8 @@ docker run --rm \
   'find /home/node/.openclaw -xdev -exec chown node:node {} +; \
    [ -d /home/node/.openclaw/workspace/.openclaw ] && chown -R node:node /home/node/.openclaw/workspace/.openclaw || true'
 
-# ── Onboarding (headless — config is already written) ────────────
-echo ""
-echo "==> Starting gateway for onboarding"
-compose up -d openclaw-gateway
-sleep 3
-
-echo ""
-echo "==> Running onboarding (interactive)"
-echo "   Gateway port:  $OPENCLAW_GATEWAY_PORT"
-echo "   Gateway token: $OPENCLAW_GATEWAY_TOKEN"
-echo "   Bind mode:     $OPENCLAW_GATEWAY_BIND"
-echo ""
-compose run --rm openclaw-cli onboard --mode local --no-install-daemon
-
-# ── Stop gateway to re-pin config ────────────────────────────────
-echo ""
-echo "==> Stopping gateway to re-pin config"
-compose down
-
-# ── Re-pin config (onboarding may overwrite some values) ─────────
-echo ""
-echo "==> Re-pinning gateway and plugin config"
-cli_run config set gateway.mode local >/dev/null
-cli_run config set gateway.bind "$OPENCLAW_GATEWAY_BIND" >/dev/null
-
-# Re-pin allowedOrigins
-ALLOWED_JSON='["http://127.0.0.1:'"$OPENCLAW_GATEWAY_PORT"'","http://localhost:'"$OPENCLAW_GATEWAY_PORT"'"'
-if [[ -n "$LAN_IP" ]]; then
-  ALLOWED_JSON="${ALLOWED_JSON}"',"http://'"$LAN_IP"':'"$OPENCLAW_GATEWAY_PORT"'"'
-fi
-if [[ "$ENABLE_NGROK" =~ ^[Yy] ]] && [[ -n "$NGROK_DOMAIN" ]]; then
-  ALLOWED_JSON="${ALLOWED_JSON}"',"https://'"$NGROK_DOMAIN"'"'
-fi
-ALLOWED_JSON="${ALLOWED_JSON}]"
-cli_run config set gateway.controlUi.allowedOrigins "$ALLOWED_JSON" --strict-json >/dev/null
-
-# Re-pin trusted proxies
-cli_run config set gateway.trustedProxies '["172.18.0.0/16", "172.17.0.0/16", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8"]' --strict-json >/dev/null
-
-# Re-pin plugin config (onboarding may strip it)
-cli_run config set plugins.entries.cliver-marketplace.enabled true --strict-json >/dev/null
-cli_run config set plugins.entries.cliver-marketplace.config.apiUrl "$CLIVER_API_URL" >/dev/null
-cli_run config set plugins.entries.cliver-marketplace.config.chatUrl "$CLIVER_CHAT_URL" >/dev/null
-cli_run config set plugins.entries.cliver-marketplace.config.apiKey "$CLIVER_API_KEY" >/dev/null
-
-# Remove tools.allow — let all plugin tools work
-cli_run config unset tools.allow >/dev/null 2>&1 || true
-
-# ── Enable sandbox ──────────────────────────────────────────────
-echo ""
-echo "==> Enabling agent sandbox"
-cli_run config set agents.defaults.sandbox.mode "non-main" >/dev/null
-cli_run config set agents.defaults.sandbox.scope "agent" >/dev/null
-cli_run config set agents.defaults.sandbox.workspaceAccess "none" >/dev/null
+# All config is already written directly to openclaw.json, agent.json,
+# and auth-profiles.json above — no cli_run re-pinning needed.
 
 # ── Start gateway (final) ───────────────────────────────────────
 echo ""
