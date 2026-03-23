@@ -146,11 +146,14 @@ echo "  Agent name: $AGENT_NAME"
 
 # ── Auto-register on Cliver ─────────────────────────────────────
 echo ""
-echo "==> Registering agent '${AGENT_NAME}' on Cliver..."
+if [[ -n "${CLIVER_API_KEY:-}" ]]; then
+  echo "  Using existing API key: ${CLIVER_API_KEY:0:16}..."
+else
+  echo "==> Registering agent '${AGENT_NAME}' on Cliver..."
 
-REGISTER_RESPONSE="$(curl -s -X POST "${PROBE_URL}/auth/open-register" \
-  -H "Content-Type: application/json" \
-  -d "$(cat <<ENDJSON
+  REGISTER_RESPONSE="$(curl -s -X POST "${PROBE_URL}/auth/open-register" \
+    -H "Content-Type: application/json" \
+    -d "$(cat <<ENDJSON
 {
   "name": "${AGENT_NAME}",
   "skills": ["image-generation", "writing", "coding", "research"],
@@ -159,8 +162,8 @@ REGISTER_RESPONSE="$(curl -s -X POST "${PROBE_URL}/auth/open-register" \
 ENDJSON
 )" 2>&1)" || true
 
-# Extract API key from response
-CLIVER_API_KEY="$(echo "$REGISTER_RESPONSE" | python3 -c "
+  # Extract API key from response
+  CLIVER_API_KEY="$(echo "$REGISTER_RESPONSE" | python3 -c "
 import json, sys
 try:
   data = json.load(sys.stdin)
@@ -177,26 +180,27 @@ except Exception as e:
   sys.exit(1)
 " 2>&1)"
 
-if [[ "$CLIVER_API_KEY" == ERROR:* ]]; then
-  echo "  Registration failed: ${CLIVER_API_KEY#ERROR:}"
-  echo ""
-  read -rp "Enter existing Cliver API key manually (or Ctrl+C to abort): " CLIVER_API_KEY
-  if [[ -z "$CLIVER_API_KEY" ]]; then
-    fail "No API key provided"
-  fi
-else
-  echo "  Registered successfully!"
-  echo "  API Key: ${CLIVER_API_KEY}"
-  # Show starter credits if available
-  STARTER_CREDITS="$(echo "$REGISTER_RESPONSE" | python3 -c "
+  if [[ "$CLIVER_API_KEY" == ERROR:* ]]; then
+    echo "  Registration failed: ${CLIVER_API_KEY#ERROR:}"
+    echo ""
+    read -rp "Enter existing Cliver API key manually (or Ctrl+C to abort): " CLIVER_API_KEY
+    if [[ -z "$CLIVER_API_KEY" ]]; then
+      fail "No API key provided"
+    fi
+  else
+    echo "  Registered successfully!"
+    echo "  API Key: ${CLIVER_API_KEY}"
+    # Show starter credits if available
+    STARTER_CREDITS="$(echo "$REGISTER_RESPONSE" | python3 -c "
 import json, sys
 try:
   data = json.load(sys.stdin)
   print(data.get('starterCredits', 0), end='')
 except: print('0', end='')
 " 2>/dev/null || echo "0")"
-  if [[ "$STARTER_CREDITS" != "0" ]]; then
-    echo "  Starter credits: \$${STARTER_CREDITS}"
+    if [[ "$STARTER_CREDITS" != "0" ]]; then
+      echo "  Starter credits: \$${STARTER_CREDITS}"
+    fi
   fi
 fi
 
@@ -301,6 +305,7 @@ cat > "$ENV_FILE" <<EOF
 OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
 CLIVER_API_URL=${CLIVER_API_URL}
 CLIVER_CHAT_URL=${CLIVER_CHAT_URL}
+CLIVER_API_KEY=${CLIVER_API_KEY}
 GOOGLE_API_KEY=${GOOGLE_API_KEY}
 AGENT_NAME="${AGENT_NAME}"
 ENABLE_NGROK=${ENABLE_NGROK}
