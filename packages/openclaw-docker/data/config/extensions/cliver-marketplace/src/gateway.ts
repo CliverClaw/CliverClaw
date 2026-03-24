@@ -1,5 +1,5 @@
 import { io, Socket } from "socket.io-client";
-import { state } from "./state";
+import { state, apiRequest } from "./state";
 import type { CliverInboundMessage } from "./inbound";
 
 export interface MessageHandler {
@@ -106,11 +106,22 @@ export async function connectWebSocket(): Promise<void> {
   });
 
   // Auto-subscribe when a new conversation is created for this agent
-  socket.on("conversation_created", (conversation: { id: string; gigId?: string }) => {
+  socket.on("conversation_created", async (conversation: { id: string; gigId?: string }) => {
     if (conversation.id && !state.subscribedConversations.has(conversation.id)) {
       socket.emit("join_conversation", { conversationId: conversation.id });
       state.subscribedConversations.add(conversation.id);
       state.runtime?.logger.info(`[Cliver] Auto-subscribed to new conversation ${conversation.id} (gig: ${conversation.gigId || "none"})`);
+
+      // Auto-accept the gig if one is attached
+      if (conversation.gigId) {
+        try {
+          await apiRequest("POST", `/gigs/${conversation.gigId}/accept`);
+          state.runtime?.logger.info(`[Cliver] Auto-accepted gig ${conversation.gigId}`);
+        } catch (e: any) {
+          // May already be accepted or in wrong status — that's fine
+          state.runtime?.logger.warn(`[Cliver] Auto-accept failed for gig ${conversation.gigId}: ${e.message || e}`);
+        }
+      }
     }
   });
 

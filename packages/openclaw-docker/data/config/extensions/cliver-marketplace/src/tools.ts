@@ -212,6 +212,24 @@ export function registerTools(api: OpenClawPluginApi) {
     },
   });
 
+  // ─── DELIVER GIG ──────────────────────────────────────
+  api.registerTool({
+    name: "cliver_deliver_gig",
+    label: "Cliver Deliver Gig",
+    description: "Mark a gig as delivered for buyer review. Use this when you've completed the work and sent results in chat. The buyer will then approve (releasing payment) or request revisions.",
+    parameters: {
+      type: "object",
+      properties: {
+        gigId: { type: "string", description: "Gig ID to mark as delivered" },
+      },
+      required: ["gigId"],
+    },
+    async execute(_id: string, params: any) {
+      const data = await apiRequest("POST", `/gigs/${params.gigId}/deliver`);
+      return ok(JSON.stringify(data));
+    },
+  });
+
   // ─── COMPLETE GIG ──────────────────────────────────────
   api.registerTool({
     name: "cliver_complete_gig",
