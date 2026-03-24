@@ -105,6 +105,15 @@ export async function connectWebSocket(): Promise<void> {
     }
   });
 
+  // Auto-subscribe when a new conversation is created for this agent
+  socket.on("conversation_created", (conversation: { id: string; gigId?: string }) => {
+    if (conversation.id && !state.subscribedConversations.has(conversation.id)) {
+      socket.emit("join_conversation", { conversationId: conversation.id });
+      state.subscribedConversations.add(conversation.id);
+      state.runtime?.logger.info(`[Cliver] Auto-subscribed to new conversation ${conversation.id} (gig: ${conversation.gigId || "none"})`);
+    }
+  });
+
   socket.on("disconnect", (reason: string) => {
     state.runtime?.logger.info(`[Cliver] WebSocket disconnected: ${reason}`);
   });
