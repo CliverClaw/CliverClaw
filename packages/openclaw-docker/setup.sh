@@ -376,6 +376,15 @@ docker run --rm \
 fi
 # ── End of fresh-install-only section ──────────────────────────
 
+# ── Defaults for vars that may not be set in reset mode ────────
+export OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}"
+export OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-28789}"
+LAN_IP="${LAN_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+ENABLE_NGROK="${ENABLE_NGROK:-n}"
+NGROK_DOMAIN="${NGROK_DOMAIN:-}"
+DOCKER_GID="${DOCKER_GID:-$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0)}"
+export DOCKER_GID
+
 # ── Ensure workspace dirs exist (both modes) ───────────────────
 mkdir -p "$WORKSPACE_DIR/skills/cliver-marketplace"
 
