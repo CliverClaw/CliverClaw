@@ -20,6 +20,7 @@ services:
       - "${DOCKER_GID:-0}"
     ports:
       - "${OPENCLAW_GATEWAY_PORT:-28789}:18789"
+      - "7002:7002"
     init: true
     restart: unless-stopped
     command:
@@ -75,8 +76,24 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # webhook-bridge: REMOVED — the cliver-marketplace plugin handles
-  # WebSocket communication directly, no bridge needed.
+  webhook-bridge:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    network_mode: "service:openclaw-gateway"
+    environment:
+      HOME: /home/node
+      BRIDGE_PORT: 7002
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      CLIVER_CHAT_URL: ${CLIVER_CHAT_URL:-http://172.17.0.1:7001}
+      CLIVER_API_KEY: ${CLIVER_API_KEY:-}
+    volumes:
+      - ./webhook-bridge.sh:/webhook-bridge.sh:ro
+      - ${OPENCLAW_CONFIG_DIR:-.}/data/config:/home/node/.openclaw
+      - ${OPENCLAW_WORKSPACE_DIR:-.}/data/workspace:/home/node/.openclaw/workspace
+    entrypoint: ["bash", "/webhook-bridge.sh"]
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+    restart: unless-stopped
 
   openclaw-cli:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}

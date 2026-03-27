@@ -621,6 +621,66 @@ curl -s ${CLIVER_API_URL}/agents/me/balance \\
 5. Complete the gig when work is delivered
 ENDSKILL
 
+# ── Generate HEARTBEAT.md ─────────────────────────────────────────
+echo "==> Generating HEARTBEAT.md"
+cat > "$WORKSPACE_DIR/HEARTBEAT.md" <<ENDHEARTBEAT
+# Cliver Marketplace Agent
+
+You are an AI agent on the Cliver marketplace. Your job is to accept gigs, chat with buyers, and generate images.
+
+## CRITICAL: Image Generation Rules
+
+**DO NOT use the built-in \`image_generate\` tool.** It saves files locally where the upload tool cannot access them.
+
+**ALWAYS use \`exec\` with curl to generate and deliver images.** This is the ONLY working method:
+
+### Step 1: Generate image and save to file
+\`\`\`bash
+curl -s -X POST ${CLIVER_API_URL}/gateway/google-ai/execute \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${CLIVER_API_KEY}" \\
+  -d '{"action": "image", "prompt": "YOUR PROMPT HERE"}' \\
+  | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const items=JSON.parse(j.data.content);const b64=items[0].dataUrl.split(',')[1];require('fs').writeFileSync('/tmp/generated-image.png',Buffer.from(b64,'base64'));console.log('OK')}catch(e){console.error(e.message)}})"
+\`\`\`
+
+### Step 2: Upload image to chat
+\`\`\`bash
+curl -s -X POST ${CLIVER_CHAT_URL}/api/chats/CONVERSATION_ID/upload \\
+  -H "X-API-Key: ${CLIVER_API_KEY}" \\
+  -F "file=@/tmp/generated-image.png"
+\`\`\`
+
+### Step 3: Send caption
+\`\`\`bash
+curl -s -X POST ${CLIVER_CHAT_URL}/api/chats/CONVERSATION_ID/messages \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${CLIVER_API_KEY}" \\
+  -d '{"content": "Here is your image!", "type": "text"}'
+\`\`\`
+
+## Chat API
+
+**Send message:**
+\`\`\`bash
+curl -s -X POST ${CLIVER_CHAT_URL}/api/chats/CONVERSATION_ID/messages \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${CLIVER_API_KEY}" \\
+  -d '{"content": "Your message", "type": "text"}'
+\`\`\`
+
+## Gig Management
+
+- Accept gigs: \`cliver_accept_gig\`
+- Complete gigs: \`cliver_complete_gig\`
+- Check gigs: \`cliver_get_my_gigs\`
+
+## Rules
+
+- Always respond to buyer messages immediately
+- Use curl commands via exec for ALL image generation and chat operations
+- Never use built-in image_generate — it creates files the upload tool cannot access
+ENDHEARTBEAT
+
 # ── Fix permissions again after writing config ──────────────────
 echo "==> Fixing permissions after config write"
 docker run --rm \
@@ -661,6 +721,25 @@ fi
 echo ""
 echo "==> Starting auto-approve sidecar"
 compose up -d auto-approve
+
+# ── Start webhook bridge ──────────────────────────────────────
+echo ""
+echo "==> Starting webhook bridge"
+compose up -d webhook-bridge
+
+# ── Register webhook with Cliver ──────────────────────────────
+echo ""
+echo "==> Registering webhook with Cliver"
+WEBHOOK_RESPONSE="$(curl -s -X POST "${PROBE_URL}/webhooks" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ${CLIVER_API_KEY}" \
+  -d "{\"url\": \"http://${CLIVER_HOST}:7002/webhook\", \"events\": [\"message_received\", \"gig_created\"], \"description\": \"OpenClaw agent webhook bridge\"}" 2>&1)" || true
+
+if echo "$WEBHOOK_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('webhook',{}).get('id',''))" 2>/dev/null | grep -q .; then
+  echo "  Webhook registered successfully"
+else
+  echo "  Webhook registration failed (may already exist): ${WEBHOOK_RESPONSE:0:100}"
+fi
 
 # ── Auto-approve pending device pairings ────────────────────────
 echo ""
