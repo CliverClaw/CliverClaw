@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
-#  Cliver Agent — Fully Automated Fresh Install
-#  Registers on the Cliver marketplace, configures LLM, and starts
-#  the OpenClaw gateway with the Cliver plugin pre-configured.
-#  No manual steps needed after running this script.
+#  Cliver Agent — Setup & Reset
+#
+#  Usage:
+#    ./setup.sh              Fresh install (register, configure, start)
+#    ./setup.sh --reset      Reset workspace & restart (keep credentials)
+#    ./setup.sh --interactive Prompt for all values
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -42,18 +44,28 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 required (try:
 
 # ── Parse flags ────────────────────────────────────────────────
 INTERACTIVE=false
+RESET_MODE=false
 for arg in "$@"; do
   case "$arg" in
     --interactive|-i) INTERACTIVE=true ;;
+    --reset|-r) RESET_MODE=true ;;
   esac
 done
 export INTERACTIVE
 
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-echo "  Cliver Agent — Automated Fresh Install"
-echo "═══════════════════════════════════════════════════════════"
-echo ""
+if [[ "$RESET_MODE" == "true" ]]; then
+  echo ""
+  echo "═══════════════════════════════════════════════════════════"
+  echo "  Cliver Agent — Reset"
+  echo "═══════════════════════════════════════════════════════════"
+  echo ""
+else
+  echo ""
+  echo "═══════════════════════════════════════════════════════════"
+  echo "  Cliver Agent — Automated Fresh Install"
+  echo "═══════════════════════════════════════════════════════════"
+  echo ""
+fi
 
 # ── Detect platform ──────────────────────────────────────────────
 OS="$(uname -s)"
@@ -80,6 +92,29 @@ if [[ -f "$ENV_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$ENV_FILE"
   set +a
+fi
+
+# ── Reset mode: validate we have an existing install ─────────────
+if [[ "$RESET_MODE" == "true" ]]; then
+  if [[ ! -f "$ENV_FILE" ]]; then
+    fail "No .env found — run ./setup.sh (without --reset) first"
+  fi
+  if [[ -z "${CLIVER_API_KEY:-}" ]]; then
+    fail "No CLIVER_API_KEY in .env — run ./setup.sh (without --reset) first"
+  fi
+  echo "  Existing API key: ${CLIVER_API_KEY:0:16}..."
+  echo "  Agent name: ${AGENT_NAME:-OpenClaw Agent}"
+  echo ""
+
+  # Wipe workspace (sessions, conversations, memory) but keep config
+  echo "==> Wiping workspace..."
+  rm -rf "$WORKSPACE_DIR"/* "$WORKSPACE_DIR"/.git "$WORKSPACE_DIR"/.openclaw 2>/dev/null || true
+  # Wipe agent sessions
+  rm -rf "$CONFIG_DIR/agents/main/sessions" 2>/dev/null || true
+  mkdir -p "$CONFIG_DIR/agents/main/sessions"
+  # Wipe MCP persisted config (stale API keys from previous onboarding)
+  docker exec openclaw-docker-openclaw-gateway-1 rm -rf /home/node/.cliver 2>/dev/null || true
+  echo "  Done."
 fi
 
 export OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-28789}"
@@ -134,6 +169,12 @@ else
   read -rp "Continue anyway? (y/N): " CONTINUE
   [[ "$CONTINUE" =~ ^[Yy] ]] || exit 1
 fi
+
+# ── Skip registration & heavy setup in reset mode ─────────────
+if [[ "$RESET_MODE" == "true" ]]; then
+  # Jump straight to config generation — credentials already loaded from .env
+  echo "==> Skipping registration (reset mode)"
+else
 
 # ── Resolve agent name ────────────────────────────────────────
 echo ""
@@ -331,6 +372,12 @@ docker run --rm \
   --user root --entrypoint sh "$OPENCLAW_IMAGE" -c \
   'find /home/node/.openclaw -xdev -exec chown node:node {} +; \
    [ -d /home/node/.openclaw/workspace/.openclaw ] && chown -R node:node /home/node/.openclaw/workspace/.openclaw || true'
+
+fi
+# ── End of fresh-install-only section ──────────────────────────
+
+# ── Ensure workspace dirs exist (both modes) ───────────────────
+mkdir -p "$WORKSPACE_DIR/skills/cliver-marketplace"
 
 # ── Write openclaw.json ─────────────────────────────────────────
 echo ""
