@@ -782,6 +782,14 @@ compose up -d auto-approve
 echo ""
 echo "==> Starting webhook bridge"
 compose up -d webhook-bridge
+# Wait for bridge to bind to the gateway's network namespace
+sleep 3
+# Verify bridge is reachable (restart once if port isn't ready due to race)
+if ! curl -fsS http://127.0.0.1:7002/health >/dev/null 2>&1; then
+  echo "  Bridge port not ready, restarting..."
+  compose restart webhook-bridge
+  sleep 3
+fi
 
 # ── Register webhook with Cliver ──────────────────────────────
 echo ""
