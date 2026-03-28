@@ -21,9 +21,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATA_DIR="$SCRIPT_DIR/data"
 CONFIG_DIR="$DATA_DIR/config"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+# Load .env for GOOGLE_API_KEY and other settings
+if [ -f "$ENV_FILE" ]; then
+  set -a; source "$ENV_FILE"; set +a
+fi
 
 if [ ! -d "$DATA_DIR" ]; then
   echo "Error: data directory not found at $DATA_DIR"
+  exit 1
+fi
+
+if [ -z "${GOOGLE_API_KEY:-}" ]; then
+  echo "Error: GOOGLE_API_KEY not set. Add it to .env or export it."
   exit 1
 fi
 
@@ -170,14 +181,14 @@ else
   echo "      Warning: auth-profiles.json missing!"
   echo "      Creating from template..."
   mkdir -p "$(dirname "$AUTH_FILE")"
-  cat > "$AUTH_FILE" << 'AUTHEOF'
+  cat > "$AUTH_FILE" << AUTHEOF
 {
   "version": 1,
   "profiles": {
     "google:default": {
       "type": "api_key",
       "provider": "google",
-      "key": "AIzaSyDFiemMXL2BnHbS2Jwp-0sRi0ObTwZ58bI"
+      "key": "${GOOGLE_API_KEY}"
     }
   },
   "lastGood": {
