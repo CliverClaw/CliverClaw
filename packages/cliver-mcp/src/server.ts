@@ -52,13 +52,46 @@ import * as path from 'path';
 import FormData from 'form-data';
 import { io, Socket } from 'socket.io-client';
 
+// ===========================================
+// PERSISTENT CONFIG (survives restarts)
+// ===========================================
+
+const CLIVER_CONFIG_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.cliver');
+const CLIVER_CONFIG_FILE = path.join(CLIVER_CONFIG_DIR, 'config.json');
+
+interface CliverConfig {
+  apiKey?: string;
+  apiUrl?: string;
+}
+
+function loadPersistedConfig(): CliverConfig {
+  try {
+    if (fs.existsSync(CLIVER_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CLIVER_CONFIG_FILE, 'utf8'));
+    }
+  } catch { /* ignore corrupt config */ }
+  return {};
+}
+
+function persistConfig(updates: Partial<CliverConfig>): void {
+  try {
+    fs.mkdirSync(CLIVER_CONFIG_DIR, { recursive: true });
+    const existing = loadPersistedConfig();
+    const merged = { ...existing, ...updates };
+    fs.writeFileSync(CLIVER_CONFIG_FILE, JSON.stringify(merged, null, 2));
+  } catch (err) {
+    console.error('Failed to persist cliver config:', err);
+  }
+}
+
 // Configuration
-const API_BASE_URL = process.env.CLIVER_API_URL || 'http://localhost:7000';
+const persistedConfig = loadPersistedConfig();
+const API_BASE_URL = process.env.CLIVER_API_URL || persistedConfig.apiUrl || 'http://localhost:7000';
 const CHAT_BASE_URL = process.env.CLIVER_CHAT_URL || 'http://localhost:7001';
 
 // Authentication storage
-// Supports both API keys (preferred) and JWT tokens (legacy)
-let apiKey: string | null = process.env.CLIVER_API_KEY || null;
+// Supports both API keys (preferred), persisted config, and JWT tokens (legacy)
+let apiKey: string | null = process.env.CLIVER_API_KEY || persistedConfig.apiKey || null;
 let authToken: string | null = process.env.CLIVER_TOKEN || null;
 
 // Determine auth method
@@ -84,12 +117,14 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 // Log auth status on startup
-if (apiKey) {
-  console.error('Cliver MCP: Using API key from CLIVER_API_KEY environment variable');
+if (process.env.CLIVER_API_KEY) {
+  console.error('Cliver MCP: Using API key from CLIVER_API_KEY env');
+} else if (persistedConfig.apiKey) {
+  console.error('Cliver MCP: Using API key from ~/.cliver/config.json');
 } else if (authToken) {
-  console.error('Cliver MCP: Using JWT token from CLIVER_TOKEN environment variable (legacy)');
+  console.error('Cliver MCP: Using JWT token from CLIVER_TOKEN env (legacy)');
 } else {
-  console.error('Cliver MCP: No credentials set. Use CLIVER_API_KEY or cliver_auth to authenticate.');
+  console.error('Cliver MCP: No credentials set. Use cliver_onboard to register.');
 }
 
 // ===========================================
@@ -143,9 +178,12 @@ class ChatClient {
       this.reconnecting = false;
       console.error('ChatClient: Connected to chat server');
 
+      // Emit auth event (server expects this to mark agent online)
+      this.socket?.emit('auth', auth);
+
       // Resubscribe to conversations after reconnect
       for (const conversationId of this.subscribedConversations) {
-        this.socket?.emit('join', { conversationId });
+        this.socket?.emit('join_conversation', { conversationId });
       }
     });
 
@@ -163,7 +201,7 @@ class ChatClient {
     });
 
     // Listen for incoming messages
-    this.socket.on('message', (message: ChatMessage) => {
+    this.socket.on('new_message', (message: ChatMessage) => {
       // Only buffer messages from humans (not our own agent messages)
       if (message.senderType === 'human') {
         this.addToBuffer(message);
@@ -190,7 +228,7 @@ class ChatClient {
       return false;
     }
     this.subscribedConversations.add(conversationId);
-    this.socket.emit('join', { conversationId });
+    this.socket.emit('join_conversation', { conversationId });
     console.error(`ChatClient: Subscribed to conversation ${conversationId}`);
     return true;
   }
@@ -1246,12 +1284,17 @@ No wallet or API key needed — you'll get one automatically.`;
     apiKey = openResult.apiKey;
     agentInfo = openResult.agent;
 
+    // Auto-persist the API key so it survives restarts
+    persistConfig({ apiKey: openResult.apiKey, apiUrl: API_BASE_URL });
+
     const creditsMsg = openResult.starterCredits
       ? ` You received $${openResult.starterCredits} in free Gateway API credits.`
       : '';
     steps.push(`Registered via open registration: ${agentInfo!.name}${creditsMsg}`);
-    steps.push(`API Key generated: ${openResult.apiKey}`);
-    steps.push('IMPORTANT: Save your API key as CLIVER_API_KEY in your MCP config for future sessions.');
+    steps.push(`API Key generated and saved to ~/.cliver/config.json (auto-loaded on restart)`);
+
+    // Connect to chat server so agent appears online
+    try { getChatClient(); } catch { /* non-fatal */ }
   } else {
     steps.push('Authenticated');
 
@@ -1342,6 +1385,38 @@ Next steps:
   - Create a service: cliver_create_service({ title, description, price, category })
   - Check for gigs: cliver_get_my_gigs()
   - Check balance: cliver_check_balance()`;
+}
+
+// Auto-connect chat client on startup if we have auth (makes agent appear online)
+function autoConnectChat(): void {
+  if (getAuthMethod() !== 'none') {
+    try {
+      getChatClient();
+      console.error('Cliver MCP: Auto-connected to chat server (agent online)');
+    } catch {
+      console.error('Cliver MCP: Failed to auto-connect chat client');
+    }
+  }
+}
+// Delay slightly to let the MCP server finish initialization
+setTimeout(autoConnectChat, 2000);
+
+async function handleConfigure(args: unknown): Promise<string> {
+  const input = args as { apiKey: string; apiUrl?: string };
+
+  if (!input.apiKey || !input.apiKey.startsWith('cliver_sk_')) {
+    return 'Invalid API key format. Must start with cliver_sk_';
+  }
+
+  // Update in-memory state immediately
+  apiKey = input.apiKey;
+
+  // Persist to disk
+  const updates: CliverConfig = { apiKey: input.apiKey };
+  if (input.apiUrl) updates.apiUrl = input.apiUrl;
+  persistConfig(updates);
+
+  return `Configuration saved to ~/.cliver/config.json\n\nAPI key: ${input.apiKey.slice(0, 18)}...${input.apiKey.slice(-4)}\nAPI URL: ${input.apiUrl || API_BASE_URL}\n\nThis key will be auto-loaded on future MCP server restarts.`;
 }
 
 async function handleCheckBalance(_args: unknown): Promise<string> {
@@ -1536,9 +1611,12 @@ async function main() {
           result = await handleGetChatStatus(args);
           break;
 
-        // Onboarding & balance
+        // Onboarding, config & balance
         case 'cliver_onboard':
           result = await handleOnboard(args);
+          break;
+        case 'cliver_configure':
+          result = await handleConfigure(args);
           break;
         case 'cliver_check_balance':
           result = await handleCheckBalance(args);

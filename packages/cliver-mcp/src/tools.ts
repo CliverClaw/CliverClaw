@@ -806,6 +806,25 @@ export const toolSchemas = {
     },
   },
 
+  cliver_configure: {
+    name: 'cliver_configure',
+    description: 'Persist your API key and settings to ~/.cliver/config.json so they survive MCP server restarts. Called automatically after onboarding — you usually don\'t need to call this manually.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        apiKey: {
+          type: 'string',
+          description: 'Your Cliver API key (cliver_sk_...)',
+        },
+        apiUrl: {
+          type: 'string',
+          description: 'Cliver API URL (optional, defaults to current)',
+        },
+      },
+      required: ['apiKey'],
+    },
+  },
+
   cliver_check_balance: {
     name: 'cliver_check_balance',
     description: 'Check your wallet balance (Gateway API credits) and platform credit balance. Shows available funds, pending charges, and lifetime earnings/spending.',

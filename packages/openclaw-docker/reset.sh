@@ -34,7 +34,9 @@ echo ""
 # --- 1. Stop containers ---
 echo "[1/6] Stopping containers..."
 cd "$SCRIPT_DIR"
-docker compose --profile ngrok stop 2>/dev/null || true
+# Clear persisted cliver MCP config (API keys from previous onboarding) before stopping
+docker exec openclaw-docker-openclaw-gateway-1 rm -rf /home/node/.cliver 2>/dev/null || true
+docker compose stop 2>/dev/null || true
 echo "      Done."
 
 # --- 2. Clean root-owned files via Docker ---
@@ -59,23 +61,101 @@ docker run --rm -v "$DATA_DIR:/data" alpine sh -c '
 '
 echo "      Done."
 
-# --- 3. Strip MCP servers from openclaw.json ---
-echo "[3/6] Stripping MCP servers from config..."
+# Re-seed HEARTBEAT.md for polling fallback
+docker run --rm -i -v "$DATA_DIR:/data" alpine sh -c 'mkdir -p /data/workspace && cat > /data/workspace/HEARTBEAT.md' << 'HBEOF'
+# Cliver Marketplace Polling
+
+Poll for new Cliver gigs and messages every 30 seconds when idle, every 10 seconds when you have active conversations.
+
+## Tasks
+
+- Check for pending gigs: `cliver_get_my_gigs({ status: "pending" })`
+- Check for new messages: `cliver_get_new_messages({})`
+- If you have active gigs, check their status and respond to buyers promptly
+
+## Image Generation & Delivery
+
+When a buyer requests an image, use the Cliver Gateway API:
+
+### Step 1: Generate image via Fal/Flux
+```bash
+curl -s -X POST http://172.17.0.1:7000/gateway/fal/execute \
+  -H "X-API-Key: $(cat ~/.cliver/config.json | grep apiKey | cut -d'"' -f4)" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"generate-image","prompt":"YOUR PROMPT","model":"fal-ai/flux/schnell","imageSize":"landscape_16_9"}'
+```
+This returns a jobId. Poll for the result:
+
+### Step 2: Check status and get image URL
+```bash
+curl -s http://172.17.0.1:7000/gateway/fal/status/JOB_ID \
+  -H "X-API-Key: $(cat ~/.cliver/config.json | grep apiKey | cut -d'"' -f4)"
+```
+When complete, this returns a result with an image URL.
+
+### Step 3: Download the image
+```bash
+curl -sL -o /tmp/generated-image.png "IMAGE_URL_FROM_RESULT"
+```
+
+### Step 4: Upload to chat
+Use `cliver_upload_chat_file({ conversationId: "...", filePath: "/tmp/generated-image.png", caption: "Here's your image!" })`
+
+**IMPORTANT:** Always download and upload the actual file. Never send raw URLs to the buyer.
+
+## Notes
+
+- When a new gig appears, accept it and message the buyer
+- Always respond to buyer messages within a few seconds
+- Use cliver_send_message to reply in conversations
+- Use cliver_upload_chat_file to send deliverables
+HBEOF
+
+# --- 3. Set Cliver MCP server in openclaw.json ---
+echo "[3/6] Configuring Cliver MCP server..."
+CLIVER_API_URL="${CLIVER_API_URL:-http://172.17.0.1:7000}"
 if command -v python3 &>/dev/null; then
   python3 -c "
 import json, sys
 cfg_path = '$CONFIG_DIR/openclaw.json'
+api_url = '$CLIVER_API_URL'
 with open(cfg_path) as f:
     cfg = json.load(f)
-# Remove MCP servers — agent will re-add via onboarding
-cfg.pop('mcp', None)
+# Set Cliver MCP server (pre-configured so agent has tools on boot)
+
+# Read Gemini API key from auth-profiles
+gemini_key = ''
+try:
+    auth_path = '$CONFIG_DIR/agents/main/agent/auth-profiles.json'
+    with open(auth_path) as af:
+        auth = json.load(af)
+    for p in auth.get('profiles', {}).values():
+        if p.get('provider') == 'google' and p.get('key'):
+            gemini_key = p['key']
+            break
+except: pass
+
+cfg['mcp'] = {
+    'servers': {
+        'cliver': {
+            'command': 'npx',
+            'args': ['-y', 'cliver-mcp'],
+            'env': {'CLIVER_API_URL': api_url, 'CLIVER_CHAT_URL': api_url.replace(':7000', ':7001')}
+        },
+        'nano-banana': {
+            'command': 'npx',
+            'args': ['-y', 'nano-banana-mcp'],
+            'env': {'GOOGLE_AI_API_KEY': gemini_key}
+        }
+    }
+}
 # Reset meta timestamp
 if 'meta' in cfg:
     cfg['meta'].pop('lastTouchedAt', None)
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\n')
-print('      Removed MCP servers from openclaw.json')
+print(f'      Cliver MCP configured (API: {api_url})')
 "
 else
   echo "      Warning: python3 not found, skipping MCP cleanup"
@@ -124,7 +204,8 @@ fi
 
 # --- 6. Restart containers ---
 echo "[6/6] Starting containers..."
-docker compose --profile ngrok up -d 2>&1
+# Note: ngrok is managed by host systemd service (cliver-ngrok.service), not Docker
+docker compose up -d 2>&1
 echo ""
 
 # Wait for health
@@ -146,9 +227,11 @@ echo "  - Gateway config (openclaw.json)"
 echo "  - Gemini API key (auth-profiles.json)"
 echo "  - Device identity & paired devices"
 echo ""
+echo "Configured:"
+echo "  - Cliver MCP server (cliver-mcp via npx)"
+echo ""
 echo "Wiped:"
 echo "  - Agent sessions & conversations"
-echo "  - MCP server configs"
 echo "  - Logs, canvas, workspace files"
 echo ""
 echo "The Claw is fresh and ready for onboarding."
